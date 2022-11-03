@@ -1,0 +1,97 @@
+---
+title: "Clean NOAA Weather Data and CAISO LMPs"
+author: "Jaxon Stuhr"
+date: "November 3, 2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(reticulate)
+library(here)
+library(tidyverse)
+library(mapview)
+```
+
+```{r}
+# pandas already installed
+# py_install("pandas")
+pd = import("pandas")
+```
+
+```{r}
+# pull weather pkl file names/paths into array
+ac_weather_files <- list.files(path="C:/Users/jzs88/Box/LMP_Predictive_Modeling/acWeather",
+                    pattern=".pkl", 
+                    all.files=T, 
+                    full.names=T)
+
+ac_lmp_files <- list.files(path="C:/Users/jzs88/Box/LMP_Predictive_Modeling/acLMPs",
+                    pattern=".pkl", 
+                    all.files=T, 
+                    full.names=T)
+
+us_land_path <- "C:/Users/jzs88/Box/LMP_Predictive_Modeling/spatial_grid/USland_0.125_(-125,-112)_(32,43).pkl"
+ref_grid_path <- "C:/Users/jzs88/Box/LMP_Predictive_Modeling/spatial_grid/ref_grid_0.125_(-125,-112)_(32,43).pkl"
+```
+
+
+```{r}
+# each acWeather pkl file is 24 (hours) x 1 x 15 (parameters) x 9152 (space dimensions)
+# build a list of all 182 days (each pkl file is 1 day/24 hours)
+# total list ac_weather is 182 elements, with each element containing all the weather data for a single day
+# build in 4 chunks because crashes when doing as 1
+sample_weather = pd$read_pickle(ac_weather_files[1])
+# initialize a list with first item using pandas read_pickle function 
+ac_weather = list(pd$read_pickle(ac_weather_files[1]))
+# add next 49 days of data to list
+for (i in 2:50) {
+  ac_weather = c(ac_weather, list(pd$read_pickle(ac_weather_files[i])))
+}
+
+for (i in 51:100) {
+  ac_weather = c(ac_weather, list(pd$read_pickle(ac_weather_files[i])))
+}
+
+for (i in 101:150) {
+  ac_weather = c(ac_weather, list(pd$read_pickle(ac_weather_files[i])))
+}
+
+for (i in 151:182) {
+  ac_weather = c(ac_weather, list(pd$read_pickle(ac_weather_files[i])))
+}
+```
+
+```{r}
+sample_lmp = pd$read_pickle(ac_lmp_files[1])
+# initialize a list with first item using pandas read_pickle function 
+ac_lmps = list(pd$read_pickle(ac_lmp_files[1]))
+# add next 49 days of data to list
+for (i in 2:length(ac_lmp_files)) {
+  ac_lmps = c(ac_lmps, list(pd$read_pickle(ac_lmp_files[i])))
+}
+```
+
+```{r}
+# read in us_land and ref_grid from pkl files
+us_land = pd$read_pickle(us_land_path)
+ref_grid = pd$read_pickle(ref_grid_path)
+
+# convert entire grid to data frame
+ref_grid = as.data.frame(ref_grid) 
+
+#initialize us grid
+us_grid = ref_grid %>% 
+  mutate(land = 0)
+
+# label and filter for only points on land
+us_grid$land[1:length(us_grid$land)] = us_land
+us_grid = us_grid %>% 
+  filter(land == 1)
+```
+
+```{r}
+mapview(us_grid, xcol = "V1", ycol = "V2", crs = 4269)
+```
+
+
