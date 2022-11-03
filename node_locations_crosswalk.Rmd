@@ -1,0 +1,126 @@
+---
+title: "Node Location Document Scraping"
+author: "Jaxon Stuhr"
+date: "November 3, 2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(here)
+library(tidyverse)
+library(stringr)
+library(sf)
+library(mapview)
+options(digits = 10)
+
+```
+
+```{r}
+# from sample LMP dataset for one day, get all unique LMP node_ids
+lmp_sample = read_csv(here("data", "sample_day_LMPs_all_nodes.csv"))
+node_ids = data.frame(unique(lmp_sample$NODE_ID)) %>% 
+  rename("node_ids" = unique.lmp_sample.NODE_ID.) %>% 
+  mutate(id_length = nchar(node_ids))
+# convert all node_ids to a regex on character list for use by str_extract()
+node_id_list = str_c(node_ids$node_ids, collapse = "|")
+```
+
+```{r}
+# load in raw node locations csv downloaded from html of Nodes map, clean it up
+raw_node_locations = read_csv(here("data", "caiso_nodes_raw.csv"), skip = 3) %>% 
+  rename("raw_data" = LOAD) %>% 
+  filter(!(raw_data %in% c("LOAD", "GEN"))) 
+# various text parsing to split out region, lat, and long
+node_locations = raw_node_locations %>% 
+  separate(col = raw_data, into = c("area", "leftover"), sep = "Node") %>% 
+  separate(col = leftover, into = c("region", "leftover"), sep = "(?<=[A-Za-z])(?=[0-9])", extra = 'merge') %>% 
+  separate(col = leftover, into = c("lat", "long"), sep = "-",  extra = 'merge') %>% 
+  separate(col = long, into = c("long1", "long2", "leftover"), sep = "\\.", extra = 'merge') %>% 
+  mutate(long = str_c(long1, long2, sep = ".")) %>% 
+  select(region, lat, long, leftover) %>% 
+  # trim leftover to max length of node_ids
+  mutate(leftover = str_sub(leftover, -max(node_ids$id_length), -1)) %>% 
+  # str_extract() checking all node_ids in list and finding them in leftovers
+  mutate(node_id = str_extract(leftover, node_id_list)) %>% 
+  select(region, lat, long, node_id) %>% 
+  na.omit()
+# convert lat, long to numerics
+node_locations = node_locations %>% 
+  mutate(lat = as.numeric(lat)) %>% 
+  mutate(long = -1*as.numeric(long)) 
+```
+
+```{r}
+# make df of only duplicates,  dups occur from str_extract() finding first match instead of full match
+find_dups = node_locations %>% 
+  group_by(node_id) %>% 
+  filter(n()>1)
+# list duplicate ids 
+dups = unique(find_dups$node_id)
+```
+
+```{r}
+# filter out dups for accurate dataset
+node_locations_no_dups = node_locations %>% 
+  filter(!(node_id %in% dups))
+```
+
+```{r}
+ca_nodes = node_locations %>% 
+  filter(region %in% c("CA", "PGE", "LADWP"))
+```
+
+```{r}
+guil_nodes = read_csv(here("data", "nodes.csv"))
+```
+
+
+
+```{r}
+# map date with ids for labels
+mapview(ca_nodes, xcol = "long", ycol = "lat", label = "node_id" , legend = FALSE, crs = 4269, grid = FALSE)
+```
+
+```{r}
+# export to csv
+write_csv(node_locations_no_dups, here("outputs", "node_locations.csv"))
+write_csv(ca_nodes, here("outputs", "ca_node_locations.csv"))
+
+```
+
+```{#r}
+for (row in 1:nrow(node_locations)) {
+  for (node_id in node_ids$node_ids) {
+    if (str_sub(node_locations$leftover[row], -nchar(node_id), -1) == node_id ) {
+      node_locations$node_id[row] = node_id
+    }
+  }
+}
+```
+
+```{#r}
+sample = raw_node_locations[1:20,] %>% 
+  separate(col = raw_data, into = c("area", "leftover"), sep = "Node") %>% 
+  separate(col = leftover, into = c("region", "leftover"), sep = "(?<=[A-Za-z])(?=[0-9])", extra = 'merge') %>% 
+  separate(col = leftover, into = c("lat", "long", "leftover"), sep = "-",  extra = 'merge') %>% 
+  separate(col = long, into = c("long1", "long2", "long_drop"), sep = "\\.", extra = 'merge') %>% 
+  mutate(long = str_c(long1, long2, sep = ".")) %>% 
+  select(region, lat, long, leftover) %>% 
+  mutate(leftover = str_sub(leftover, -max(node_ids$id_length), -1)) %>% 
+  mutate(node_id = NA)
+
+
+for (row in 1:nrow(sample)) {
+  for (node_id in node_ids$node_ids) {
+    if (str_sub(sample$leftover[row], -nchar(node_id), -1) == node_id ) {
+      sample$node_id[row] = node_id
+    }
+  }
+}
+
+
+```
+
+
+
