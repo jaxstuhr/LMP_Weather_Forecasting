@@ -11,6 +11,7 @@ library(reticulate)
 library(here)
 library(tidyverse)
 library(mapview)
+library(writexl)
 ```
 
 ```{r}
@@ -35,13 +36,250 @@ us_land_path <- "C:/Users/jzs88/Box/LMP_Predictive_Modeling/spatial_grid/USland_
 ref_grid_path <- "C:/Users/jzs88/Box/LMP_Predictive_Modeling/spatial_grid/ref_grid_0.125_(-125,-112)_(32,43).pkl"
 ```
 
+```{r}
+# setup crosswalk of weather parameters
+weather_params_ac = data.frame(
+  param = c("PRES", "DSWRF", "DLWRF", "DPT_2m", "RH_2m", "TMP_2m", "WS_10m", "WS_60m", "WS_80m", "WS_100m", "WS_120m", "DI_2m", "WC_2m", "HCDH_2m", "GSI"),
+  unit = c("pa", "W/m2", "W/m2", "K", "%", "K", "m/s", "m/s", "m/s", "m/s", "m/s", "?", "K?", "degree_hour", "?")
+)
+```
 
 ```{r}
+# read in us_land and ref_grid from pkl files
+us_land = pd$read_pickle(us_land_path)
+ref_grid = pd$read_pickle(ref_grid_path)
+
+# convert entire grid to data frame
+ref_grid = as.data.frame(ref_grid) %>% 
+  rename(lon = V1,
+         lat = V2)
+
+#initialize us grid
+us_grid = ref_grid %>% 
+  mutate(land = 0)
+
+# label and filter for only points on land
+us_grid$land[1:length(us_grid$land)] = us_land
+us_grid = us_grid %>% 
+  filter(land == 1)
+```
+
+```{r}
+# read in a sample weather file, vectorize
+#sample_weather = c(pd$read_pickle(ac_weather_files[1]))
+hours = 24
+params = 15
+locs = 9152
+
+# build list of hours that is length 24 (hrs)
+hours_list = 0:23
+
+# build list of parameters that is length 24 (hrs) x 15 (parameters)
+hour = 0
+param_index = 1
+params_list = matrix(1, hours*params)
+for (i in 1:length(params_list)) {
+  if (hour < hours) {
+    params_list[i] = weather_params_ac$param[param_index]
+    hour = hour + 1
+  } else {
+    param_index = param_index + 1
+    params_list[i] = weather_params_ac$param[param_index]
+    hour = 1
+  }
+}
+
+# build lists of lats and lons that are length 24 (hrs) x 15 (parameters) x 9152 (locations)
+hour_params = 0
+loc_index = 1
+lat_list = matrix(1, hours*params*locs)
+lon_list = matrix(1, hours*params*locs)
+for (i in 1:length(lat_list)) {
+  if (hour_params < hours*params) {
+    lat_list[i] = ref_grid$lat[loc_index]
+    lon_list[i] = ref_grid$lon[loc_index]
+    hour_params = hour_params + 1
+  } else {
+    loc_index = loc_index + 1
+    lat_list[i] = ref_grid$lat[loc_index]
+    lon_list[i] = ref_grid$lon[loc_index]
+    hour_params = 1
+  }
+}
+```
+
+```{r}
+# create function to build dataframe from list of files paths, list of dates, and variable lists
+build_weather_data_frame = function(file_paths, dates) {
+  
+  # if different number of file paths and dates, throw an error
+  if (length(file_paths) != length(dates)) {
+    return(NA)
+  }
+  
+  # initialize complete weathere data frame
+  weather_data_frame = data.frame(matrix(nrow = 0, ncol = 6))
+  colnames(weather_data_frame) = c("value", "date", "hour", "parameter", "lat", "lon")
+  
+  # iterate through file paths provided
+  for (i in 1:length(file_paths)) {
+    # read in vectorized weather data from current file path
+    weather_list = c(pd$read_pickle(file_paths[i]))
+    # build new data frame of current weather data
+    current_weather = data.frame(
+      # values from current vectorized weather list
+      value = weather_list,
+      # date from current data
+      date = dates[i],
+      # hour, parameter, lat, lon from previoiusly built iterative lists
+      hour = hours_list,
+      parameter = params_list,
+      lat = lat_list, 
+      lon = lon_list
+      )
+    # append current weather data to complete data frame
+    weather_data_frame = rbind(weather_data_frame, current_weather)
+  }
+  
+  # return data frame with weather from all files and dates provided
+  return(weather_data_frame)
+}
+
+# build weather data frame for first 20 actual weather data files, takes ~1 minute, fails for 25+ files
+full_matrix = build_weather_data_frame(ac_weather_files[1:20], dates = c(1:20))
+
+```
+
+```{r}
+# initialize values for building LMP dataframe
+
+# 5 minute bins => 12 bins per hour, assuming 0-55
+lmp_minutes = 12
+# build list of LMP minutes 0, 5, 10, ..., 55
+lmp_minute_list = (0:11)*5
+lmp_hours = 24
+
+# start minute, hour counters at 0
+minute = 0
+hour = 0
+# build LMP hour list of length 288 = 12 (minute bins) x 24 (hours)
+lmp_hour_list = matrix(1, lmp_minutes*lmp_hours)
+# iterate through list
+for (i in 1:length(lmp_hour_list)) {
+  # first 12 bins have hour = 0, then 1, etc up to 23
+  if (minute < lmp_minutes) {
+    lmp_hour_list[i] = hour
+    minute = minute + 1
+  } else {
+    hour = hour + 1
+    lmp_hour_list[i] = hour
+    minute = 1
+  }
+}
+```
+
+```{r}
+# write a function that returns LMPs for input lists of file paths
+
+build_lmp_data_frame = function(file_paths) {
+  # initialize LMP data frame with column labels
+  lmp_data_frame = data.frame(matrix(nrow = 0, ncol = 7))
+  colnames(lmp_1_data_frame) = c("lmp", "date", "hour", "minute", "node_id", "lat", "lon") 
+  # iterate through file paths
+  for (lmp_file in file_paths) {
+    # pull out full dataset for current path, node_id, lat, lon
+    current_node_lmps = pd$read_pickle(lmp_file)
+    current_node_id = current_node_lmps[[1]][[1]]
+    current_lat = current_node_lmps[[1]][[2]]
+    current_lon = current_node_lmps[[1]][[3]]
+    # iterate through all days for current node
+    for (i in 2:length(current_node_lmps)) {
+      # pull out all data for day i
+      day_data = current_node_lmps[i]
+      # pull out only LMPs for day i
+      lmps_list = c(day_data[[1]])
+      # build dataframe for day i LMPs
+      current_day_lmps = data.frame(
+        # values from current vectorized LMP list
+        lmp = lmps_list,
+        # date from current data
+        date = names(current_node_lmps[i]),
+        # hour, minute from previoiusly built iterative lists
+        hour = lmp_hour_list,
+        minute = lmp_minute_list,
+        # node id, lat, lon, consistent across entire nested for loop
+        node_id = current_node_id,
+        lat = current_lat, 
+        lon = current_lon
+      ) 
+      # bind this days data to complete data frame
+      lmp_data_frame = rbind(lmp_data_frame, current_day_lmps)
+    }
+  }
+  # return entire LMP data frame
+  return(lmp_data_frame)
+}
+```
+
+```{r}
+# build lmp data frame for first two node ids
+### Currently the NODE IDs, Lat, and Lon in the METadata is corrupted, need to update manually for goleta nodes
+lmp_data = build_lmp_data_frame(ac_lmp_files[1:2])
+```
+
+```{#r}
+lmp_1 = pd$read_pickle(ac_lmp_files[1])
+current_node_id = lmp_1[[1]][[1]]
+current_lat = lmp_1[[1]][[2]]
+current_lon = lmp_1[[1]][[3]]
+
+lmp_1_data_frame = data.frame(matrix(nrow = 0, ncol = 7))
+colnames(lmp_1_data_frame) = c("lmp", "date", "hour", "minute", "node_id", "lat", "lon") 
+
+for (i in 2:length(lmp_1)) {
+  day_data = lmp_1[i]
+  lmps_list = c(day_data[[1]])
+  full_day_lmps = data.frame(
+      # values from current vectorized weather list
+      lmp = lmps_list,
+      # date from current data
+      date = names(lmp_1[i]),
+      # hour, minute from previoiusly built iterative lists
+      hour = lmp_hour_list,
+      minute = lmp_minute_list, 
+      node_id = current_node_id,
+      lat = current_lat, 
+      lon = current_lon
+      ) 
+  lmp_1_data_frame = rbind(lmp_1_data_frame, full_day_lmps)
+}
+```
+
+```{#r}
+ac_lmp_files
+pd$read_pickle("C:/Users/jzs88/Box/LMP_Predictive_Modeling/acLMPs/CA_GOLETA_6_N002.pkl" )
+```
+
+
+```{#r}
+# doing some data validation/testing
+test_data = day_123_matrix %>% 
+  filter(date == 2,
+         parameter == "TMP_2m",
+         hour == 12) %>% 
+  mutate(t_fahrenheit = 1.8*(value-273)+32)
+
+# export to CSV to show points in newer RStudio
+write_csv(test_data, here("outputs", "test_temp_data.csv"))
+```
+
+
+```{#r}
 # each acWeather pkl file is 24 (hours) x 1 x 15 (parameters) x 9152 (space dimensions)
 # build a list of all 182 days (each pkl file is 1 day/24 hours)
 # total list ac_weather is 182 elements, with each element containing all the weather data for a single day
 # build in 4 chunks because crashes when doing as 1
-sample_weather = pd$read_pickle(ac_weather_files[1])
+
 # initialize a list with first item using pandas read_pickle function 
 ac_weather = list(pd$read_pickle(ac_weather_files[1]))
 # add next 49 days of data to list
@@ -62,36 +300,20 @@ for (i in 151:182) {
 }
 ```
 
-```{r}
-sample_lmp = pd$read_pickle(ac_lmp_files[1])
-# initialize a list with first item using pandas read_pickle function 
-ac_lmps = list(pd$read_pickle(ac_lmp_files[1]))
-# add next 49 days of data to list
-for (i in 2:length(ac_lmp_files)) {
-  ac_lmps = c(ac_lmps, list(pd$read_pickle(ac_lmp_files[i])))
-}
+```{#r}
+# this version of RStudio won't show poins with mapview, but code works 
+mapview(us_grid, xcol = "lon", ycol = "lat", crs = 4269)
 ```
 
-```{r}
-# read in us_land and ref_grid from pkl files
-us_land = pd$read_pickle(us_land_path)
-ref_grid = pd$read_pickle(ref_grid_path)
-
-# convert entire grid to data frame
-ref_grid = as.data.frame(ref_grid) 
-
-#initialize us grid
-us_grid = ref_grid %>% 
-  mutate(land = 0)
-
-# label and filter for only points on land
-us_grid$land[1:length(us_grid$land)] = us_land
-us_grid = us_grid %>% 
-  filter(land == 1)
+```{#r}
+# export to CSV to show points in newer RStudio
+write_csv(us_grid, here("outputs", "us_grid.csv"))
 ```
 
-```{r}
-mapview(us_grid, xcol = "V1", ycol = "V2", crs = 4269)
-```
+
+
+
+
+
 
 
