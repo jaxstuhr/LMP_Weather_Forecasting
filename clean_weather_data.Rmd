@@ -184,7 +184,7 @@ for (i in 1:length(lmp_hour_list)) {
 build_lmp_data_frame = function(file_paths) {
   # initialize LMP data frame with column labels
   lmp_data_frame = data.frame(matrix(nrow = 0, ncol = 7))
-  colnames(lmp_1_data_frame) = c("lmp", "date", "hour", "minute", "node_id", "lat", "lon") 
+  colnames(lmp_data_frame) = c("lmp", "date", "hour", "minute", "node_id", "lat", "lon") 
   # iterate through file paths
   for (lmp_file in file_paths) {
     # pull out full dataset for current path, node_id, lat, lon
