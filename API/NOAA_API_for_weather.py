@@ -9,8 +9,7 @@ from solarpy import irradiance_on_plane
 
 from scipy.interpolate import griddata
 
-# Define input paths
-path_to_data = r"/Users/Guille/Desktop/caiso_power/data/"
+# Define temporal directory to store downloding chunks
 path_to_temp = r"/Users/Guille/Desktop/caiso_power/data/temp/"
 
 # Define output paths
