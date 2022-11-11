@@ -12,6 +12,8 @@ library(here)
 library(tidyverse)
 library(mapview)
 library(writexl)
+library(stringr)
+library(lubridate)
 ```
 
 ```{r}
@@ -110,27 +112,24 @@ for (i in 1:length(lat_list)) {
 
 ```{r}
 # create function to build dataframe from list of files paths, list of dates, and variable lists
-build_weather_data_frame = function(file_paths, dates) {
-  
-  # if different number of file paths and dates, throw an error
-  if (length(file_paths) != length(dates)) {
-    return(NA)
-  }
-  
+build_weather_data_frame = function(file_paths) {
+
   # initialize complete weathere data frame
-  weather_data_frame = data.frame(matrix(nrow = 0, ncol = 6))
-  colnames(weather_data_frame) = c("value", "date", "hour", "parameter", "lat", "lon")
+  weather_data_frame = data.frame(matrix(nrow = 0, ncol = 8))
+  colnames(weather_data_frame) = c("value", "year", "month", "day", "hour", "parameter", "lat", "lon")
   
   # iterate through file paths provided
   for (i in 1:length(file_paths)) {
     # read in vectorized weather data from current file path
     weather_list = c(pd$read_pickle(file_paths[i]))
+    date = ymd(str_sub(sub(".pkl", "", file_paths[i]), -8, -1))
     # build new data frame of current weather data
     current_weather = data.frame(
       # values from current vectorized weather list
       value = weather_list,
-      # date from current data
-      date = dates[i],
+      year = year(date),
+      month = month(date),
+      day = day(date),
       # hour, parameter, lat, lon from previoiusly built iterative lists
       hour = hours_list,
       parameter = params_list,
@@ -144,10 +143,24 @@ build_weather_data_frame = function(file_paths, dates) {
   # return data frame with weather from all files and dates provided
   return(weather_data_frame)
 }
+```
 
+```{r}
 # build weather data frame for first 20 actual weather data files, takes ~1 minute, fails for 25+ files
-full_matrix = build_weather_data_frame(ac_weather_files[1:20], dates = c(1:20))
+weather_1_20 = build_weather_data_frame(ac_weather_files[1:20])
+# weather_21_40 = build_weather_data_frame(ac_weather_files[21:40])
+# weather_41_60 = build_weather_data_frame(ac_weather_files[41:60])
+# weather_61_80 = build_weather_data_frame(ac_weather_files[61:80])
+# weather_81_100 = build_weather_data_frame(ac_weather_files[81:100])
+# weather_101_120 = build_weather_data_frame(ac_weather_files[101:120])
+# weather_121_140 = build_weather_data_frame(ac_weather_files[81:100])
+# weather_141_160 = build_weather_data_frame(ac_weather_files[81:160])
+# weather_161_180 = build_weather_data_frame(ac_weather_files[161:180])
+# weather_181_182 = build_weather_data_frame(ac_weather_files[181:182])
+```
 
+```{#r}
+all_weather = rbind(weather_1_20, weather_1_20, weather_1_20, weather_1_20, weather_1_20, weather_1_20, weather_1_20, weather_1_20, weather_1_20, weather_1_20)
 ```
 
 ```{r}
@@ -198,12 +211,15 @@ build_lmp_data_frame = function(file_paths) {
       day_data = current_node_lmps[i]
       # pull out only LMPs for day i
       lmps_list = c(day_data[[1]])
+      date = ymd(names(current_node_lmps[i]))
       # build dataframe for day i LMPs
       current_day_lmps = data.frame(
         # values from current vectorized LMP list
         lmp = lmps_list,
         # date from current data
-        date = names(current_node_lmps[i]),
+        year = year(date),
+        month = month(date),
+        day = day(date),
         # hour, minute from previoiusly built iterative lists
         hour = lmp_hour_list,
         minute = lmp_minute_list,
@@ -224,7 +240,27 @@ build_lmp_data_frame = function(file_paths) {
 ```{r}
 # build lmp data frame for first two node ids
 ### Currently the NODE IDs, Lat, and Lon in the METadata is corrupted, need to update manually for goleta nodes
-lmp_data = build_lmp_data_frame(ac_lmp_files[1:2])
+lmp_data_1_2 = build_lmp_data_frame(ac_lmp_files[1:2])
+lmp_data_3_4 = build_lmp_data_frame(ac_lmp_files[3:4])
+lmp_data_5 = build_lmp_data_frame(ac_lmp_files[5])
+lmps_full = rbind(lmp_data_1_2, lmp_data_3_4, lmp_data_5) %>% 
+  filter(minute == 0) %>% 
+  select(-minute)
+```
+
+```{r}
+lmps_2019 = lmps_full %>% 
+  filter(year == 2019) %>% 
+  select(-year)
+lmps_2020 = lmps_full %>% 
+  filter(year == 2020)%>% 
+  select(-year)
+lmps_2021 = lmps_full %>% 
+  filter(year == 2021)%>% 
+  select(-year)
+lmps_2022 = lmps_full %>% 
+  filter(year == 2022)%>% 
+  select(-year)
 ```
 
 ```{#r}
