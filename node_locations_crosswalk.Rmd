@@ -39,6 +39,7 @@ node_locations = raw_node_locations %>%
   separate(col = lon, into = c("lon1", "lon2", "leftover"), sep = "\\.", extra = 'merge') %>% 
   mutate(lon = str_c(lon1, lon2, sep = ".")) %>% 
   select(region, lat, lon, leftover) %>% 
+
   # trim leftover to max length of node_ids
   mutate(leftover = str_sub(leftover, -max(node_ids$id_length), -1)) %>% 
   # str_extract() checking all node_ids in list and finding them in leftovers
@@ -49,6 +50,7 @@ node_locations = raw_node_locations %>%
 node_locations = node_locations %>% 
   mutate(lat = as.numeric(lat)) %>% 
   mutate(lon = -1*as.numeric(lon)) 
+
 ```
 
 ```{r}
@@ -89,38 +91,7 @@ write_csv(ca_nodes, here("outputs", "ca_node_locations.csv"))
 
 ```
 
-```{#r}
-for (row in 1:nrow(node_locations)) {
-  for (node_id in node_ids$node_ids) {
-    if (str_sub(node_locations$leftover[row], -nchar(node_id), -1) == node_id ) {
-      node_locations$node_id[row] = node_id
-    }
-  }
-}
-```
 
-```{#r}
-sample = raw_node_locations[1:20,] %>% 
-  separate(col = raw_data, into = c("area", "leftover"), sep = "Node") %>% 
-  separate(col = leftover, into = c("region", "leftover"), sep = "(?<=[A-Za-z])(?=[0-9])", extra = 'merge') %>% 
-  separate(col = leftover, into = c("lat", "lon", "leftover"), sep = "-",  extra = 'merge') %>% 
-  separate(col = lon, into = c("lon1", "lon2", "lon_drop"), sep = "\\.", extra = 'merge') %>% 
-  mutate(lon = str_c(lon1, lon2, sep = ".")) %>% 
-  select(region, lat, lon, leftover) %>% 
-  mutate(leftover = str_sub(leftover, -max(node_ids$id_length), -1)) %>% 
-  mutate(node_id = NA)
-
-
-for (row in 1:nrow(sample)) {
-  for (node_id in node_ids$node_ids) {
-    if (str_sub(sample$leftover[row], -nchar(node_id), -1) == node_id ) {
-      sample$node_id[row] = node_id
-    }
-  }
-}
-
-
-```
 
 
 
