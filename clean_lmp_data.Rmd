@@ -1,0 +1,148 @@
+---
+title: "Clean LMP Data"
+author: "Jaxon Stuhr"
+date: "2022-11-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(reticulate)
+library(here)
+library(tidyverse)
+library(mapview)
+library(writexl)
+library(stringr)
+library(lubridate)
+library(R.utils)
+```
+
+RUN node_locations_crosswalk.Rmd FIRST!!!!
+
+```{r}
+# pandas already installed
+# py_install("pandas")
+pd = import("pandas")
+```
+
+```{r}
+ac_lmp_files <- list.files(path="C:/Users/jzs88/Box/LMP_Predictive_Modeling/acLMPs",
+                    pattern=".pkl", 
+                    all.files=T, 
+                    full.names=T)
+```
+
+
+
+```{r}
+# initialize values for building LMP dataframe
+
+# 5 minute bins => 12 bins per hour, assuming 0-55
+lmp_minutes = 12
+# build list of LMP minutes 0, 5, 10, ..., 55
+lmp_minute_list = (0:11)*5
+lmp_hours = 24
+
+# start minute, hour counters at 0
+minute = 0
+hour = 0
+# build LMP hour list of length 288 = 12 (minute bins) x 24 (hours)
+lmp_hour_list = matrix(1, lmp_minutes*lmp_hours)
+# iterate through list
+for (i in 1:length(lmp_hour_list)) {
+  # first 12 bins have hour = 0, then 1, etc up to 23
+  if (minute < lmp_minutes) {
+    lmp_hour_list[i] = hour
+    minute = minute + 1
+  } else {
+    hour = hour + 1
+    lmp_hour_list[i] = hour
+    minute = 1
+  }
+}
+```
+
+
+
+```{r}
+# write a function that returns LMPs for input lists of file paths
+
+build_lmp_data_frame = function(file_paths) {
+  # initialize LMP data frame with column labels
+  lmp_data_frame = data.frame(matrix(nrow = 0, ncol = 7))
+  colnames(lmp_data_frame) = c("lmp", "date", "hour", "minute", "node_id", "lat", "lon") 
+  # iterate through file paths
+  for (lmp_file in file_paths) {
+    # pull out full dataset for current path, node_id, lat, lon
+    current_node_id = sub(".pkl", "", sub("C:/Users/jzs88/Box/LMP_Predictive_Modeling/acLMPs/CA_", "", lmp_file))
+    current_lat = node_locations_no_dups$lat[match(current_node_id, node_locations_no_dups$node_id)]
+    current_lon = node_locations_no_dups$lon[match(current_node_id, node_locations_no_dups$node_id)] 
+    
+    current_node_lmps = pd$read_pickle(lmp_file)
+    # current_node_id = current_node_lmps[[1]][[1]]
+    # current_lat = current_node_lmps[[1]][[2]]
+    # current_lon = current_node_lmps[[1]][[3]]
+    # iterate through all days for current node
+    for (i in 2:length(current_node_lmps)) {
+      # pull out all data for day i
+      day_data = current_node_lmps[i]
+      # pull out only LMPs for day i
+      lmps_list = c(day_data[[1]])
+      date = ymd(names(current_node_lmps[i]))
+      # build dataframe for day i LMPs
+      current_day_lmps = data.frame(
+        # values from current vectorized LMP list
+        lmp = lmps_list,
+        # date from current data
+        year = year(date),
+        month = month(date),
+        day = day(date),
+        # hour, minute from previoiusly built iterative lists
+        hour = lmp_hour_list,
+        minute = lmp_minute_list,
+        # node id, lat, lon, consistent across entire nested for loop
+        node_id = current_node_id,
+        lat = current_lat, 
+        lon = current_lon
+      ) 
+      # bind this days data to complete data frame
+      lmp_data_frame = rbind(lmp_data_frame, current_day_lmps)
+    }
+  }
+  lmp_data_frame = lmp_data_frame %>% 
+    filter(minute == 0) %>% 
+    mutate(date = ymd_h(paste(year, month, day, hour))) %>% 
+    select(-c(year, month, day, hour, minute))
+  # return entire LMP data frame
+  return(lmp_data_frame)
+}
+```
+
+```{r}
+# build lmp data frame for first two node ids
+### Currently the NODE IDs, Lat, and Lon in the METadata is corrupted, need to update manually for goleta nodes
+#lmp_data_1 = build_lmp_data_frame(ac_lmp_files[1])
+
+lmp_data_1_2 = build_lmp_data_frame(ac_lmp_files[1:2])
+lmp_data_3_4 = build_lmp_data_frame(ac_lmp_files[3:4])
+lmp_data_5 = build_lmp_data_frame(ac_lmp_files[5])
+lmps_full = rbind(lmp_data_1_2, lmp_data_3_4, lmp_data_5) #%>% 
+  #filter(minute == 0) %>% 
+  #select(-minute)
+```
+
+```{r}
+lmps_2019 = lmps_full %>% 
+  filter(year == 2019) %>% 
+  select(-year)
+lmps_2020 = lmps_full %>% 
+  filter(year == 2020)%>% 
+  select(-year)
+lmps_2021 = lmps_full %>% 
+  filter(year == 2021)%>% 
+  select(-year)
+lmps_2022 = lmps_full %>% 
+  filter(year == 2022)%>% 
+  select(-year)
+```
+

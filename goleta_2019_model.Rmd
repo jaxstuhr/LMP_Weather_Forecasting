@@ -1,0 +1,285 @@
+---
+title: "Predicting 2019 Goleta LMPs"
+author: "Jaxon Stuhr"
+date: "2022-11-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(reticulate)
+library(here)
+library(tidyverse)
+library(mapview)
+library(writexl)
+library(stringr)
+library(lubridate)
+library(R.utils)
+library(tidymodels)
+library(glmnet)
+library(yardstick)
+```
+
+RUN clean_lmp_data.Rmd FIRST!!!
+
+This script models Goleta LMPs based on actual weather data for the second half of 2019.
+LMPs are for the node: 
+
+```{r}
+# build goleta lmps data frame
+goleta_lmps = lmps_full %>% 
+  filter(node_id == "GOLETA_6_N200") %>% 
+  filter(year(date) == 2019) #%>% 
+  #filter(minute == 0) %>% 
+  # select(-c(year)) %>% 
+  # mutate(date = paste(month, day, hour))
+# build dataframe of goleta_node lat and lon
+loc_goleta = c(unique(goleta_lmps$lat), unique(goleta_lmps$lon))
+# specify max radius within which to include weather observations
+radius = 2
+```
+
+```{r}
+# pull weather pkl file names/paths into array
+ac_weather_files <- list.files(path="C:/Users/jzs88/Box/LMP_Predictive_Modeling/acWeather",
+                    pattern=".pkl", 
+                    all.files=T, 
+                    full.names=T)
+
+us_land_path <- "C:/Users/jzs88/Box/LMP_Predictive_Modeling/spatial_grid/USland_0.125_(-125,-112)_(32,43).pkl"
+ref_grid_path <- "C:/Users/jzs88/Box/LMP_Predictive_Modeling/spatial_grid/ref_grid_0.125_(-125,-112)_(32,43).pkl"
+```
+
+```{r}
+# setup crosswalk of weather parameters
+weather_params_ac = data.frame(
+  param = c("PRES",  "DSWRF", "DLWRF", "DPT_2m", "RH_2m", "TMP_2m", "WS_10m", "WS_60m", "WS_80m", "WS_100m", "WS_120m", "DI_2m", "WC_2m", "HCDH_2m", "GSI"),
+  unit = c("pa", "W/m2", "W/m2", "K", "%", "K", "m/s", "m/s", "m/s", "m/s", "m/s", "?", "K?", "degree_hour", "?")
+)
+```
+
+```{r}
+# read in us_land and ref_grid from pkl files
+us_land = pd$read_pickle(us_land_path)
+ref_grid = pd$read_pickle(ref_grid_path)
+
+# convert entire grid to data frame
+ref_grid = as.data.frame(ref_grid) %>% 
+  rename(lon = V1,
+         lat = V2)
+
+#initialize us grid
+us_grid = ref_grid %>% 
+  mutate(land = 0)
+
+# label and filter for only points on land
+us_grid$land[1:length(us_grid$land)] = us_land
+us_grid = us_grid %>% 
+  filter(land == 1)
+```
+
+```{r}
+# read in a sample weather file, vectorize
+#sample_weather = c(pd$read_pickle(ac_weather_files[1]))
+hours = 24
+params = 15
+locs = 9152
+
+# build list of hours that is length 24 (hrs)
+hours_list = 0:23
+
+# build list of parameters that is length 24 (hrs) x 15 (parameters)
+hour = 0
+param_index = 1
+params_list = matrix(1, hours*params)
+for (i in 1:length(params_list)) {
+  if (hour < hours) {
+    params_list[i] = weather_params_ac$param[param_index]
+    hour = hour + 1
+  } else {
+    param_index = param_index + 1
+    params_list[i] = weather_params_ac$param[param_index]
+    hour = 1
+  }
+}
+
+# build lists of lats and lons that are length 24 (hrs) x 15 (parameters) x 9152 (locations)
+hour_params = 0
+loc_index = 1
+lat_list = matrix(1, hours*params*locs)
+lon_list = matrix(1, hours*params*locs)
+for (i in 1:length(lat_list)) {
+  if (hour_params < hours*params) {
+    lat_list[i] = ref_grid$lat[loc_index]
+    lon_list[i] = ref_grid$lon[loc_index]
+    hour_params = hour_params + 1
+  } else {
+    loc_index = loc_index + 1
+    lat_list[i] = ref_grid$lat[loc_index]
+    lon_list[i] = ref_grid$lon[loc_index]
+    hour_params = 1
+  }
+}
+```
+
+```{r}
+# create function to build dataframe from list of files paths, list of dates, and variable lists
+build_weather_data_frame = function(file_paths) {
+
+  # initialize complete weathere data frame
+  weather_data_frame = data.frame(matrix(nrow = 0, ncol = 137284))
+  colnames(weather_data_frame) = c("value", "year", "month", "day", "hour", "parameter", "lat", "lon")
+  
+  # iterate through file paths provided
+  for (i in 1:length(file_paths)) {
+    # print which path code is on no check run speed
+    print(i)
+    flush.console()
+    # read in vectorized weather data from current file path
+    weather_list = c(pd$read_pickle(file_paths[i]))
+    date = ymd(str_sub(sub(".pkl", "", file_paths[i]), -8, -1))
+    # build new data frame of current weather data
+    current_weather = data.frame(
+      # values from current vectorized weather list
+      value = weather_list,
+      year = year(date),
+      month = month(date),
+      day = day(date),
+      # hour, parameter, lat, lon from previoiusly built iterative lists
+      hour = hours_list,
+      parameter = params_list,
+      lat = lat_list, 
+      lon = lon_list
+      ) %>% 
+      # filter out weather data for locations w/ euclidean distance > radius specified above
+      filter( ((loc_goleta[1] - lat)^2 + (loc_goleta[2] - lon)^2)^(1/2) < radius) %>% 
+      # expand data to include an individual covariate for each parameter at each location
+      pivot_wider(names_from = c(parameter, lat, lon), values_from = value, names_sep = "//")
+    # append current weather data to complete data frame
+    weather_data_frame = rbind(weather_data_frame, current_weather) 
+  }
+  weather_data_frame = weather_data_frame %>% 
+      mutate(date = ymd_h(paste(year, month, day, hour))) %>% 
+      select(-c(year, month, day, hour))
+  # return data frame with weather from all files and dates provided
+  return(weather_data_frame)
+}
+```
+
+
+```{#r}
+# testing GZip compression
+weather_test = build_weather_data_frame(ac_weather_files[1:5]) #%>% 
+ # mutate(distance = ((loc_goleta[1] - lat)^2 + (loc_goleta[2] - lon)^2)^(1/2))
+```
+
+```{#r}
+# save as rds file
+saveRDS(weather_test, file = here("outputs", "weather_test.rds"))
+```
+
+```{#r}
+# read in rds weather file
+test_weather = readRDS(here("outputs", "weather_test.rds"))
+```
+
+```{#r}
+# save as gzip file
+weather_gz <- gzfile("weather_test.gz", "w")
+write.csv(weather_test, weather_gz)
+close(weather_gz)
+```
+
+```{r}
+# build weather data frame for first 80 actual weather data files, takes ~8 minutes, fails for 80+ files
+weather_1_80 = build_weather_data_frame(ac_weather_files[1:80])
+weather_81_160 = build_weather_data_frame(ac_weather_files[81:160])
+weather_161_182 = build_weather_data_frame(ac_weather_files[161:182])
+# bind weather data together
+all_weather = rbind(weather_1_80, weather_81_160, weather_161_182)
+
+# all_weather = all_weather %>% 
+#   date = ymd_h(year, month, day, hour)
+#   #select(-year) %>% 
+#   # add date variable (month, day, hr)
+#   mutate(date = paste(month, day, hour)) %>% 
+#   # only dates in node data
+#   filter(date %in% goleta_lmps$date) %>% 
+#   select(-c(month, day, hour))
+```
+
+```{r}
+goleta_lmps = goleta_lmps %>% 
+  filter(date %in% all_weather$date)
+
+goleta_lmps_only = goleta_lmps %>% 
+  select(lmp, date)
+```
+
+```{r}
+filtered_lmps = goleta_lmps %>% 
+  filter(lmp < 100) %>% 
+  filter(lmp > -10)
+
+ggplot(filtered_lmps, aes(x = lmp))+
+  geom_histogram()
+
+hour_summary = goleta_lmps %>% 
+  group_by(hour = hour(date)) %>% 
+  summarize(mean_lmp = mean(lmp))
+
+ggplot(hour_summary, aes(x = hour, y = mean_lmp)) + 
+  geom_col()
+
+#mapview(all_model_data, xcol = "lon", ycol = "lat", crs = 4269, grid = FALSE)
+```
+
+
+```{r}
+all_model_data = merge(goleta_lmps_only, all_weather) %>% 
+  select(-date)
+```
+
+```{r}
+goleta_split <- initial_split(all_model_data)
+goleta_train <- training(goleta_split)
+goleta_test <- testing(goleta_split)
+```
+
+```{r}
+# generate recipe to predict lmp
+goleta_recipe <- recipe(lmp ~ ., data = goleta_train) %>% 
+  # center
+  step_center(all_predictors()) %>%
+  # scale
+  step_scale(all_predictors())
+```
+
+```{r}
+# build model using multinom regression from glmnet engine, tuning penalty and mixture
+goleta_model <- 
+  linear_reg(penalty = 1, mixture = 1) %>%
+  set_mode("regression") %>%
+  set_engine("glmnet")
+# set up workflow
+goleta_workflow <- workflow() %>% 
+  add_model(goleta_model) %>% 
+  add_recipe(goleta_recipe)
+```
+
+```{r}
+goleta_fit <- fit(goleta_workflow, goleta_train)
+```
+
+```{r}
+goleta_acc <- metric_set(rsq)
+# predict logistic regression vals
+goleta_lr <- predict(goleta_fit, new_data = goleta_test %>% select(-lmp))
+# add original survival data to new dataset
+goleta_lr <- bind_cols(goleta_lr, goleta_test %>% select(lmp))
+# 
+goleta_acc(goleta_lr, truth = lmp, 
+                estimate = .pred)
+```
+
+

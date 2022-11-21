@@ -1,0 +1,25 @@
+---
+title: "Plot Weather Grid"
+author: "Jaxon Stuhr"
+date: "2022-11-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(here)
+library(tidyverse)
+library(mapview)
+```
+
+```{r}
+us_grid = read.csv(here("data", "us_grid.csv"))
+test_temp_data = read_csv(here("data", "test_temp_data.csv"))
+```
+
+```{r}
+mapview(test_temp_data, zcol = "t_fahrenheit", xcol = "lon", ycol = "lat", crs = 4269)
+```
+
+
+
