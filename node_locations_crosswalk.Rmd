@@ -2,7 +2,9 @@
 title: "Node Locations"
 author: "Jaxon Stuhr"
 date: "2022-10-18"
-output: html_document
+output: 
+  html_document: 
+    code_folding: hide
 ---
 
 ```{r setup, include=FALSE}
@@ -53,7 +55,7 @@ node_locations = node_locations %>%
 
 ```
 
-```{r}
+```{r, Test Label}
 # make df of only duplicates,  dups occur from str_extract() finding first match instead of full match
 find_dups = node_locations %>% 
   group_by(node_id) %>% 
@@ -64,32 +66,17 @@ dups = unique(find_dups$node_id)
 
 ```{r}
 # filter out dups for accurate dataset
-node_locations_no_dups = node_locations %>% 
+node_locations_final = node_locations %>% 
   filter(!(node_id %in% dups))
+
+saveRDS(node_locations_final, here("outputs", "node_locations_final.Rds"))
 ```
-
-```{r}
-ca_nodes = node_locations %>% 
-  filter(region %in% c("CA", "PGE", "LADWP"))
-```
-
-```{r}
-guil_nodes = read_csv(here("data", "nodes.csv"))
-```
-
-
 
 ```{r}
 # map date with ids for labels
-mapview(ca_nodes, xcol = "lon", ycol = "lat", label = "node_id" , legend = FALSE, crs = 4269, grid = FALSE)
+mapview(node_locations, xcol = "lon", ycol = "lat", label = "node_id" , legend = FALSE, crs = 4269, grid = FALSE)
 ```
 
-```{r}
-# export to csv
-write_csv(node_locations_no_dups, here("outputs", "node_locations.csv"))
-write_csv(ca_nodes, here("outputs", "ca_node_locations.csv"))
-
-```
 
 
 

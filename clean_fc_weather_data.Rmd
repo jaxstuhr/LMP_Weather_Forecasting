@@ -1,7 +1,7 @@
 ---
-title: "Reading and Cleaning Weather Forecasts + LMPs"
+title: "Reading and Cleaning NOAA Weather Forecasts"
 author: "Jaxon Stuhr"
-date: "2022-11-18"
+date: "2022-12-19"
 output: html_document
 ---
 
@@ -41,7 +41,7 @@ ref_grid_path <- "C:/Users/jzs88/Box/LMP_Predictive_Modeling/spatial_grid/ref_gr
 
 ```{r}
 # setup crosswalk of weather parameters
-weather_params_ac = data.frame(
+weather_params_fc = data.frame(
   param = c("PRES", "PRATE", "DSWRF", "DLWRF", "DPT_2m", "RH_2m", "TMP_2m", "WS_10m", "WS_60m", "WS_80m", "WS_100m", "WS_120m", "DI_2m", "WC_2m", "HCDH_2m", "GSI"),
   unit = c("pa", "kg/m2/s", "W/m2", "W/m2", "K", "%", "K", "m/s", "m/s", "m/s", "m/s", "m/s", "?", "K?", "degree_hour", "?")
 )
@@ -73,25 +73,23 @@ us_grid = us_grid %>%
 hours = 36
 params = 16
 locs = 9152
-
-# build list of hours that is length 24 (hrs)
-hours_list = 0:23
-
 # build list of parameters that is length 36 (hrs) x 16 (parameters)
 hour = 0
 param_index = 1
 params_list = matrix(1, hours*params)
 for (i in 1:length(params_list)) {
   if (hour < hours) {
-    params_list[i] = weather_params_ac$param[param_index]
+    params_list[i] = weather_params_fc$param[param_index]
     hour = hour + 1
   } else {
     param_index = param_index + 1
-    params_list[i] = weather_params_ac$param[param_index]
+    params_list[i] = weather_params_fc$param[param_index]
     hour = 1
   }
 }
+```
 
+```{r}
 # build lists of lats and lons that are length 36 (hrs) x 16 (parameters) x 9152 (locations)
 hour_params = 0
 loc_index = 1
@@ -126,19 +124,22 @@ build_weather_data_frame = function(file_paths) {
     # read in vectorized weather data from current file path
     weather_list = c(pd$read_pickle(file_paths[i]))
     date = ymd(str_sub(sub("-00.pkl", "", file_paths[i]), -8, -1))
+    date_list = ymd_h(paste(year(date), month(date), day(date), 16)) + hours(0:35)
+    date_list[1:8] = ymd_h(paste(2000, 1, 1,1))
+    date_list[33:36] = ymd_h(paste(2000, 1, 1,1))
     # build new data frame of current weather data
     current_weather = data.frame(
       # values from current vectorized weather list
       value = weather_list,
-      year = year(date),
-      month = month(date),
-      day = day(date),
-      # hour, parameter, lat, lon from previoiusly built iterative lists
-      hour = hours_list,
+      fc_date = date,
+      date = date_list,
       parameter = params_list,
       lat = lat_list, 
       lon = lon_list
       ) %>% 
+      filter((lat %% .25) == 0) %>% 
+      filter((lon %% .25) == 0) %>% 
+      filter(date != ymd_h(paste(2000, 1, 1,1))) %>% 
       pivot_wider(names_from = c(parameter, lat, lon), values_from = value, names_sep = "//")
     # append current weather data to complete data frame
     weather_data_frame = rbind(weather_data_frame, current_weather)
@@ -149,243 +150,90 @@ build_weather_data_frame = function(file_paths) {
 }
 ```
 
-```{r}
-weather_1 = c(pd$read_pickle(fc_weather_files[1]))
-```
-
-
-```{r}
-# testing GZip compression
-weather_test = build_weather_data_frame(fc_weather_files[1:5])
-```
-
-```{r}
-filtered_weather = weather_test %>% 
-  filter(year == 2019,
-         month == 10,
-         day == 1, 
-         hour == 3)
-```
-
-
-```{r}
-# save as rds file
-saveRDS(weather_test, file = here("outputs", "weather_test.rds"))
-```
-
-```{r}
-# read in rds weather file
-test_weather = readRDS(here("outputs", "weather_test.rds"))
-```
-
-```{r}
-# save as gzip file
-weather_gz <- gzfile("weather_test.gz", "w")
-write.csv(weather_test, weather_gz)
-close(weather_gz)
-```
-
-```{r}
+```{#kl;r}
 # build weather data frame for first 80 actual weather data files, takes ~8 minutes, fails for 80+ files
-weather_1_80 = build_weather_data_frame(ac_weather_files[1:80])
-weather_81_160 = build_weather_data_frame(ac_weather_files[81:160])
-weather_161_182 = build_weather_data_frame(ac_weather_files[161:182])
+weather_1 = build_weather_data_frame(fc_weather_files[1:50])
+weather_2 = build_weather_data_frame(fc_weather_files[51:100])
+weather_3 = build_weather_data_frame(fc_weather_files[101:106])
+weather_4 = build_weather_data_frame(fc_weather_files[108:200])
+weather_5 = build_weather_data_frame(fc_weather_files[201:250])
+weather_6 = build_weather_data_frame(fc_weather_files[251:300])
+weather_7 = build_weather_data_frame(fc_weather_files[301:365])
 # bind weather data together
-all_weather = rbind(weather_1_80, weather_81_160, weather_161_182)
-```
+all_weather = rbind(weather_1, weather_2, weather_3, weather_4, weather_5, weather_6, weather_7)
 
+saveRDS(all_weather, here("outputs", "fc_weather_1_365.rds"))
 
-```{r}
-# initialize values for building LMP dataframe
-
-# 5 minute bins => 12 bins per hour, assuming 0-55
-lmp_minutes = 12
-# build list of LMP minutes 0, 5, 10, ..., 55
-lmp_minute_list = (0:11)*5
-lmp_hours = 24
-
-# start minute, hour counters at 0
-minute = 0
-hour = 0
-# build LMP hour list of length 288 = 12 (minute bins) x 24 (hours)
-lmp_hour_list = matrix(1, lmp_minutes*lmp_hours)
-# iterate through list
-for (i in 1:length(lmp_hour_list)) {
-  # first 12 bins have hour = 0, then 1, etc up to 23
-  if (minute < lmp_minutes) {
-    lmp_hour_list[i] = hour
-    minute = minute + 1
-  } else {
-    hour = hour + 1
-    lmp_hour_list[i] = hour
-    minute = 1
-  }
-}
 ```
 
 ```{r}
-# write a function that returns LMPs for input lists of file paths
-
-build_lmp_data_frame = function(file_paths) {
-  # initialize LMP data frame with column labels
-  lmp_data_frame = data.frame(matrix(nrow = 0, ncol = 7))
-  colnames(lmp_data_frame) = c("lmp", "date", "hour", "minute", "node_id", "lat", "lon") 
-  # iterate through file paths
-  for (lmp_file in file_paths) {
-    # pull out full dataset for current path, node_id, lat, lon
-    current_node_lmps = pd$read_pickle(lmp_file)
-    current_node_id = current_node_lmps[[1]][[1]]
-    current_lat = current_node_lmps[[1]][[2]]
-    current_lon = current_node_lmps[[1]][[3]]
-    # iterate through all days for current node
-    for (i in 2:length(current_node_lmps)) {
-      # pull out all data for day i
-      day_data = current_node_lmps[i]
-      # pull out only LMPs for day i
-      lmps_list = c(day_data[[1]])
-      date = ymd(names(current_node_lmps[i]))
-      # build dataframe for day i LMPs
-      current_day_lmps = data.frame(
-        # values from current vectorized LMP list
-        lmp = lmps_list,
-        # date from current data
-        year = year(date),
-        month = month(date),
-        day = day(date),
-        # hour, minute from previoiusly built iterative lists
-        hour = lmp_hour_list,
-        minute = lmp_minute_list,
-        # node id, lat, lon, consistent across entire nested for loop
-        node_id = current_node_id,
-        lat = current_lat, 
-        lon = current_lon
-      ) 
-      # bind this days data to complete data frame
-      lmp_data_frame = rbind(lmp_data_frame, current_day_lmps)
-    }
-  }
-  # return entire LMP data frame
-  return(lmp_data_frame)
-}
+all_weather_1 = readRDS(here("outputs", "fc_weather_1_365.rds"))
 ```
 
+```{#r}
+# build weather data frame for first 80 actual weather data files, takes ~8 minutes, fails for 80+ files
+weather_1 = build_weather_data_frame(fc_weather_files[366:400])
+weather_2 = build_weather_data_frame(fc_weather_files[401:450])
+weather_3 = build_weather_data_frame(fc_weather_files[451:500])
+weather_4 = build_weather_data_frame(fc_weather_files[501:550])
+weather_5 = build_weather_data_frame(fc_weather_files[551:600])
+weather_6 = build_weather_data_frame(fc_weather_files[601:650])
+weather_7 = build_weather_data_frame(fc_weather_files[651:700])
+weather_8 = build_weather_data_frame(fc_weather_files[701:730])
 
 
+all_weather = rbind(weather_1, weather_2, weather_3, weather_4, weather_5, weather_6, weather_7, weather_8)
 
+saveRDS(all_weather, here("outputs", "fc_weather_366_730.rds"))
 
-```{r}
-# build lmp data frame for first two node ids
-### Currently the NODE IDs, Lat, and Lon in the METadata is corrupted, need to update manually for goleta nodes
-lmp_data_1_2 = build_lmp_data_frame(ac_lmp_files[1:2])
-lmp_data_3_4 = build_lmp_data_frame(ac_lmp_files[3:4])
-lmp_data_5 = build_lmp_data_frame(ac_lmp_files[5])
-lmps_full = rbind(lmp_data_1_2, lmp_data_3_4, lmp_data_5) %>% 
-  filter(minute == 0) %>% 
-  select(-minute)
 ```
 
 ```{r}
-lmps_2019 = lmps_full %>% 
-  filter(year == 2019) %>% 
-  select(-year)
-lmps_2020 = lmps_full %>% 
-  filter(year == 2020)%>% 
-  select(-year)
-lmps_2021 = lmps_full %>% 
-  filter(year == 2021)%>% 
-  select(-year)
-lmps_2022 = lmps_full %>% 
-  filter(year == 2022)%>% 
-  select(-year)
+all_weather_2 = readRDS(here("outputs", "fc_weather_366_730.rds"))
 ```
 
 ```{#r}
-lmp_1 = pd$read_pickle(ac_lmp_files[1])
-current_node_id = lmp_1[[1]][[1]]
-current_lat = lmp_1[[1]][[2]]
-current_lon = lmp_1[[1]][[3]]
+# build weather data frame for first 80 actual weather data files, takes ~8 minutes, fails for 80+ files
+weather_1 = build_weather_data_frame(fc_weather_files[731:800])
+weather_2 = build_weather_data_frame(fc_weather_files[801:850])
+weather_3 = build_weather_data_frame(fc_weather_files[851:900])
+weather_4 = build_weather_data_frame(fc_weather_files[901:950])
+weather_5 = build_weather_data_frame(fc_weather_files[951:1000])
+weather_6 = build_weather_data_frame(fc_weather_files[1001:1050])
+weather_7 = build_weather_data_frame(fc_weather_files[1051:1095])
 
-lmp_1_data_frame = data.frame(matrix(nrow = 0, ncol = 7))
-colnames(lmp_1_data_frame) = c("lmp", "date", "hour", "minute", "node_id", "lat", "lon") 
 
-for (i in 2:length(lmp_1)) {
-  day_data = lmp_1[i]
-  lmps_list = c(day_data[[1]])
-  full_day_lmps = data.frame(
-      # values from current vectorized weather list
-      lmp = lmps_list,
-      # date from current data
-      date = names(lmp_1[i]),
-      # hour, minute from previoiusly built iterative lists
-      hour = lmp_hour_list,
-      minute = lmp_minute_list, 
-      node_id = current_node_id,
-      lat = current_lat, 
-      lon = current_lon
-      ) 
-  lmp_1_data_frame = rbind(lmp_1_data_frame, full_day_lmps)
-}
+all_weather = rbind(weather_1, weather_2, weather_3, weather_4, weather_5, weather_6, weather_7)
+
+saveRDS(all_weather, here("outputs", "fc_weather_731_1095.rds"))
+
+```
+
+```{r}
+all_weather_3 = readRDS(here("outputs", "fc_weather_731_1095.rds"))
 ```
 
 ```{#r}
-ac_lmp_files
-pd$read_pickle("C:/Users/jzs88/Box/LMP_Predictive_Modeling/acLMPs/CA_GOLETA_6_N002.pkl" )
+# build weather data frame for first 80 actual weather data files, takes ~8 minutes, fails for 80+ files
+weather_1 = build_weather_data_frame(fc_weather_files[1096:1150])
+weather_2 = build_weather_data_frame(fc_weather_files[1151:1169])
+
+all_weather = rbind(weather_1, weather_2)
+
+saveRDS(all_weather, here("outputs", "fc_weather_1096_1169.rds"))
+
 ```
 
-
-```{#r}
-# doing some data validation/testing
-test_data = day_123_matrix %>% 
-  filter(date == 2,
-         parameter == "TMP_2m",
-         hour == 12) %>% 
-  mutate(t_fahrenheit = 1.8*(value-273)+32)
-
-# export to CSV to show points in newer RStudio
-write_csv(test_data, here("outputs", "test_temp_data.csv"))
+```{r}
+all_weather_4 = readRDS(here("outputs", "fc_weather_1096_1169.rds"))
 ```
 
-
-```{#r}
-# each acWeather pkl file is 24 (hours) x 1 x 15 (parameters) x 9152 (space dimensions)
-# build a list of all 182 days (each pkl file is 1 day/24 hours)
-# total list ac_weather is 182 elements, with each element containing all the weather data for a single day
-# build in 4 chunks because crashes when doing as 1
-
-# initialize a list with first item using pandas read_pickle function 
-ac_weather = list(pd$read_pickle(ac_weather_files[1]))
-# add next 49 days of data to list
-for (i in 2:50) {
-  ac_weather = c(ac_weather, list(pd$read_pickle(ac_weather_files[i])))
-}
-
-for (i in 51:100) {
-  ac_weather = c(ac_weather, list(pd$read_pickle(ac_weather_files[i])))
-}
-
-for (i in 101:150) {
-  ac_weather = c(ac_weather, list(pd$read_pickle(ac_weather_files[i])))
-}
-
-for (i in 151:182) {
-  ac_weather = c(ac_weather, list(pd$read_pickle(ac_weather_files[i])))
-}
+```{r}
+all_weather = rbind(all_weather_1, all_weather_2, all_weather_3, all_weather_4)
 ```
 
-```{#r}
-# this version of RStudio won't show poins with mapview, but code works 
-mapview(us_grid, xcol = "lon", ycol = "lat", crs = 4269)
+```{r}
+saveRDS(all_weather, here("outputs", "fc_all_weather_1169.rds"))
 ```
-
-```{#r}
-# export to CSV to show points in newer RStudio
-write_csv(us_grid, here("outputs", "us_grid.csv"))
-```
-
-
-
-
-
-
 
 

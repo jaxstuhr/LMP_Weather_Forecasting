@@ -17,8 +17,6 @@ library(lubridate)
 library(R.utils)
 ```
 
-RUN node_locations_crosswalk.Rmd FIRST!!!!
-
 ```{r}
 # pandas already installed
 # py_install("pandas")
@@ -30,9 +28,9 @@ ac_lmp_files <- list.files(path="C:/Users/jzs88/Box/LMP_Predictive_Modeling/acLM
                     pattern=".pkl", 
                     all.files=T, 
                     full.names=T)
+
+node_locations_final = readRDS(here("outputs", "node_locations_final.Rds"))
 ```
-
-
 
 ```{r}
 # initialize values for building LMP dataframe
@@ -75,8 +73,8 @@ build_lmp_data_frame = function(file_paths) {
   for (lmp_file in file_paths) {
     # pull out full dataset for current path, node_id, lat, lon
     current_node_id = sub(".pkl", "", sub("C:/Users/jzs88/Box/LMP_Predictive_Modeling/acLMPs/CA_", "", lmp_file))
-    current_lat = node_locations_no_dups$lat[match(current_node_id, node_locations_no_dups$node_id)]
-    current_lon = node_locations_no_dups$lon[match(current_node_id, node_locations_no_dups$node_id)] 
+    current_lat = node_locations_final$lat[match(current_node_id, node_locations_final$node_id)]
+    current_lon = node_locations_final$lon[match(current_node_id, node_locations_final$node_id)] 
     
     current_node_lmps = pd$read_pickle(lmp_file)
     # current_node_id = current_node_lmps[[1]][[1]]
@@ -126,23 +124,9 @@ build_lmp_data_frame = function(file_paths) {
 lmp_data_1_2 = build_lmp_data_frame(ac_lmp_files[1:2])
 lmp_data_3_4 = build_lmp_data_frame(ac_lmp_files[3:4])
 lmp_data_5 = build_lmp_data_frame(ac_lmp_files[5])
-lmps_full = rbind(lmp_data_1_2, lmp_data_3_4, lmp_data_5) #%>% 
+all_goleta_lmps = rbind(lmp_data_1_2, lmp_data_3_4, lmp_data_5) #%>% 
   #filter(minute == 0) %>% 
   #select(-minute)
-```
-
-```{r}
-lmps_2019 = lmps_full %>% 
-  filter(year == 2019) %>% 
-  select(-year)
-lmps_2020 = lmps_full %>% 
-  filter(year == 2020)%>% 
-  select(-year)
-lmps_2021 = lmps_full %>% 
-  filter(year == 2021)%>% 
-  select(-year)
-lmps_2022 = lmps_full %>% 
-  filter(year == 2022)%>% 
-  select(-year)
+saveRDS(all_goleta_lmps, here("outputs", "all_goleta_lmps.rds"))
 ```
 
